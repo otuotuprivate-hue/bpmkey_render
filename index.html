@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BPM・キー判定ツール｜音楽ファイル・YouTubeから無料で解析 - Tempo &amp; Key</title>
+  <meta name="description" content="音楽ファイルをドロップするだけでBPM（テンポ）とキー（調）を高精度に判定。範囲を指定して一部分だけ解析することもできます。ファイルはアップロードされず、ブラウザ内で処理されます。">
+  <meta property="og:title" content="BPM・キー判定ツール - Tempo & Key">
+  <meta property="og:description" content="音楽ファイルやYouTubeのBPMとキーを、ブラウザだけで判定。">
+  <meta property="og:type" content="website">
+  <meta name="theme-color" content="#E4E8EA" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141B21" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232747D9'/%3E%3Cpath d='M6 20v-8M11 24V8M16 18v-4M21 22V10M26 19v-6' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"WebApplication","name":"Tempo & Key","applicationCategory":"MultimediaApplication","operatingSystem":"Any","offers":{"@type":"Offer","price":"0","priceCurrency":"JPY"},"description":"音楽ファイルやYouTubeのBPMとキーをブラウザだけで判定するツール"}
+  </script>
+</head>
+<body class="no-side">
+  <header class="masthead">
+    <a class="brand" href="./" aria-label="Tempo & Key トップへ">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7"/><path d="M6 20v-8M11 24V8M16 18v-4M21 22V10M26 19v-6"/></svg>
+      <span class="brand-name">Tempo &amp; Key</span>
+    </a>
+    <p class="brand-tag">BPMとキーを、ブラウザだけで判定</p>
+  </header>
+
+
+  <div class="layout">
+    <main class="app">
+      <h1 class="visually-hidden">BPM・キー判定ツール</h1>
+
+      <section class="source" aria-label="解析する音源">
+        <div class="source-tabs" role="tablist">
+          <button role="tab" id="tab-file" aria-selected="true" aria-controls="panel-file">ファイル</button>
+          <button role="tab" id="tab-yt" aria-selected="false" aria-controls="panel-yt">YouTube</button>
+        </div>
+
+        <div id="panel-file" role="tabpanel" aria-labelledby="tab-file">
+          <label class="drop" id="drop">
+            <input type="file" id="file-input" accept="audio/*,video/mp4,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.aif,.aiff" class="visually-hidden">
+            <span class="drop-main">音楽ファイルをここにドロップ</span>
+            <span class="drop-sub">またはクリックして選択／Ctrl+V（⌘V）で貼り付け</span>
+            <span class="drop-formats">MP3・WAV・M4A・FLAC・OGG・AIFF</span>
+          </label>
+          <p class="privacy-note">ファイルはサーバーに送信されません。解析はすべてこの端末のブラウザ内で行われます。</p>
+        </div>
+
+        <div id="panel-yt" role="tabpanel" aria-labelledby="tab-yt" hidden>
+          <form class="yt-form" id="yt-form">
+            <label for="yt-url" class="visually-hidden">YouTubeのURL</label>
+            <input id="yt-url" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
+            <button type="submit" class="btn btn-primary">読み込む</button>
+          </form>
+          <p class="privacy-note" id="yt-help">動画を再生しながら、このタブの音声をリアルタイムで取り込んで判定します（音声のダウンロードは行いません）。PC版のChrome・Edgeに対応。判定には選択範囲の長さと同じ時間がかかります。</p>
+        </div>
+      </section>
+
+      <section class="deck" id="deck" hidden aria-label="範囲の選択と再生">
+        <div class="deck-head">
+          <p class="track-title" id="track-title"></p>
+          <p class="track-meta" id="track-meta"></p>
+        </div>
+
+        <div class="yt-player-wrap" id="yt-wrap" hidden><div id="yt-player"></div></div>
+
+        <div class="timeline" id="timeline">
+          <canvas id="wave" aria-hidden="true"></canvas>
+          <div class="sel" id="sel">
+            <button class="handle handle-start" id="h-start" role="slider" aria-label="開始位置" aria-valuemin="0"></button>
+            <button class="handle handle-end" id="h-end" role="slider" aria-label="終了位置" aria-valuemin="0"></button>
+          </div>
+          <div class="playhead" id="playhead" hidden></div>
+          <div class="hover-time" id="hover-time" hidden></div>
+        </div>
+        <p class="timeline-hint">波形をドラッグして範囲を選択。ハンドルで微調整、ダブルクリックで全体に戻ります。</p>
+
+        <div class="controls">
+          <button class="btn btn-icon" id="play" aria-label="選択範囲を再生">
+            <svg viewBox="0 0 24 24" class="i-play"><path d="M8 5.5v13l10.5-6.5z"/></svg>
+            <svg viewBox="0 0 24 24" class="i-stop"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>
+          </button>
+          <div class="range-fields">
+            <label>開始 <input id="t-start" class="time" inputmode="decimal" autocomplete="off"></label>
+            <span class="range-sep" aria-hidden="true">〜</span>
+            <label>終了 <input id="t-end" class="time" inputmode="decimal" autocomplete="off"></label>
+            <span class="range-len" id="t-len"></span>
+          </div>
+          <button class="btn btn-quiet" id="reset-range">全体</button>
+          <label class="bpm-range">BPM範囲
+            <select id="bpm-range">
+              <option value="auto">自動</option>
+              <option value="60-120">60–120</option>
+              <option value="70-140">70–140</option>
+              <option value="85-170">85–170</option>
+              <option value="100-200">100–200</option>
+            </select>
+          </label>
+          <button class="btn btn-primary" id="analyze-yt" hidden>タブの音声で判定</button>
+        </div>
+      </section>
+
+      <section class="readout" id="readout" aria-live="polite" hidden>
+        <div class="progress" id="progress" hidden><div class="progress-bar" id="progress-bar"></div><span id="progress-label">解析中…</span></div>
+
+        <div class="meters">
+          <article class="meter meter-bpm">
+            <h2 class="meter-label">BPM</h2>
+            <p class="meter-value" id="bpm-value">–</p>
+            <div class="meter-actions">
+              <button class="chip" id="bpm-half" aria-label="BPMを半分にする">÷2</button>
+              <button class="chip" id="bpm-double" aria-label="BPMを倍にする">×2</button>
+              <button class="chip" id="tap" aria-label="タップしてBPMを測る">タップ</button>
+            </div>
+            <dl class="facts" id="bpm-facts"></dl>
+          </article>
+          <article class="meter meter-key">
+            <h2 class="meter-label">キー</h2>
+            <p class="meter-value" id="key-value">–</p>
+            <p class="meter-sub" id="key-sub"></p>
+            <dl class="facts" id="key-facts"></dl>
+          </article>
+        </div>
+
+        <div class="chroma" id="chroma" aria-label="音名ごとの強さ"></div>
+
+        <div class="result-foot">
+          <p class="scope" id="scope"></p>
+          <button class="btn btn-quiet" id="copy">結果をコピー</button>
+        </div>
+        <p class="error" id="error" role="alert" hidden></p>
+      </section>
+
+
+      <section class="guide">
+        <h2>使い方</h2>
+        <ol>
+          <li>音楽ファイルをドロップするか、YouTubeのURLを貼り付けます。</li>
+          <li>ファイルの場合は曲全体のBPMとキーがすぐに表示されます。</li>
+          <li>一部分だけ調べたいときは、波形の上をドラッグして範囲を選びます。離すと自動で再判定します。</li>
+        </ol>
+        <h2>判定の仕組み</h2>
+        <p>BPMは打楽器や音の立ち上がりの周期を曲全体から求め、0.01単位まで追い込んでいます。生演奏などテンポが揺れる曲では、拍を追跡した平均テンポを表示します。BPMが倍・半分に出た場合は「÷2」「×2」か、BPM範囲の設定で切り替えられます。</p>
+        <p>キーは音程の強さの分布（クロマ）を、複数の調性プロファイルと照合して判定します。ピッチが440Hzからずれた音源も自動で補正し、基準ピッチも表示します。平行調（例：Cメジャーと Aマイナー）は構成音が同じため取り違えが起きやすく、候補として並べて表示しています。</p>
+        <h2>よくある質問</h2>
+        <h3>ファイルはどこかに保存されますか？</h3>
+        <p>いいえ。解析はブラウザ内で完結し、音声データは外部に送信・保存されません。</p>
+        <h3>Camelot（キャメロット）表記とは？</h3>
+        <p>DJがハーモニックミックスで使うキーの表記です。同じ番号、または番号が±1の曲同士は自然につながります。</p>
+      </section>
+    </main>
+
+  </div>
+
+  <footer class="footer">
+    <span>© <span id="year"></span> Tempo &amp; Key</span>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
