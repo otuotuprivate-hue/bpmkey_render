@@ -8,7 +8,7 @@ const el = {
   timeline: $('timeline'), wave: $('wave'), sel: $('sel'), hStart: $('h-start'), hEnd: $('h-end'),
   playhead: $('playhead'), hoverTime: $('hover-time'),
   play: $('play'), tStart: $('t-start'), tEnd: $('t-end'), tLen: $('t-len'), reset: $('reset-range'),
-  bpmRange: $('bpm-range'), analyzeYt: $('analyze-yt'),
+  bpmRange: $('bpm-range'), analyzeYt: $('analyze-yt'), ytSpeed: $('yt-speed'), ytSpeedWrap: $('yt-speed-wrap'),
   readout: $('readout'), progress: $('progress'), progressBar: $('progress-bar'), progressLabel: $('progress-label'),
   bpmValue: $('bpm-value'), bpmFacts: $('bpm-facts'), bpmHalf: $('bpm-half'), bpmDouble: $('bpm-double'), tap: $('tap'),
   keyValue: $('key-value'), keySub: $('key-sub'), keyFacts: $('key-facts'), chroma: $('chroma'),
@@ -68,7 +68,7 @@ el.tabFile.onclick = () => selectTab('file');
 el.tabYt.onclick = () => { selectTab('yt'); el.ytUrl.focus(); };
 
 /* ------------------------------------------------------------ file input */
-el.fileInput.onchange = () => el.fileInput.files[0] && loadFile(el.fileInput.files[0]);
+el.fileInput.onchange = () => { handleFiles(el.fileInput.files); el.fileInput.value = ''; };
 for (const t of ['dragenter', 'dragover']) {
   document.addEventListener(t, (e) => { e.preventDefault(); el.drop.classList.add('over'); });
 }
@@ -80,15 +80,14 @@ for (const t of ['dragleave', 'drop']) {
   });
 }
 document.addEventListener('drop', (e) => {
-  const f = e.dataTransfer?.files?.[0];
-  if (f) { selectTab('file'); loadFile(f); return; }
+  if (e.dataTransfer?.files?.length) { selectTab('file'); handleFiles(e.dataTransfer.files); return; }
   const text = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain');
   if (text && ytId(text)) { selectTab('yt'); el.ytUrl.value = text; loadYouTube(text); }
 });
 document.addEventListener('paste', (e) => {
   if (e.target instanceof HTMLInputElement && e.target !== el.ytUrl && e.target.type !== 'url') return;
-  const f = [...(e.clipboardData?.files || [])].find((x) => /^(audio|video)\//.test(x.type) || /\.(mp3|wav|m4a|aac|flac|ogg|opus|aiff?)$/i.test(x.name));
-  if (f) { e.preventDefault(); selectTab('file'); loadFile(f); return; }
+  const files = [...(e.clipboardData?.files || [])].filter(isAudioFile);
+  if (files.length) { e.preventDefault(); selectTab('file'); handleFiles(files); return; }
   const text = e.clipboardData?.getData('text') || '';
   if (ytId(text)) {
     e.preventDefault();
@@ -98,7 +97,23 @@ document.addEventListener('paste', (e) => {
   }
 });
 
-async function loadFile(file) {
+const AUDIO_EXT = /\.(mp3|wav|m4a|aac|flac|ogg|oga|opus|aiff?|mp4|webm)$/i;
+function isAudioFile(f) { return /^(audio|video)\//.test(f.type) || AUDIO_EXT.test(f.name); }
+const MAX_BATCH = 100;
+
+function handleFiles(list) {
+  const all = [...list];
+  const files = all.filter(isAudioFile);
+  if (!files.length) {
+    if (all.length) showError('音楽ファイルが含まれていません。MP3・WAV・M4A・FLACなどを選んでください。');
+    return;
+  }
+  if (files.length === 1) { closeBatch(); loadFile(files[0]); return; }
+  startBatch(files.slice(0, MAX_BATCH), files.length > MAX_BATCH ? files.length : 0);
+}
+
+async function loadFile(file, { fromBatch = false } = {}) {
+  if (!fromBatch) closeBatch();
   stopPlayback();
   teardownYouTube();
   state.mode = 'file';
@@ -106,6 +121,7 @@ async function loadFile(file) {
   el.deck.hidden = false;
   el.ytWrap.hidden = true;
   el.analyzeYt.hidden = true;
+  el.ytSpeedWrap.hidden = true;
   el.timeline.classList.remove('no-wave');
   el.title.textContent = file.name;
   el.meta.textContent = '読み込み中…';
@@ -316,7 +332,8 @@ for (const [input, which] of [[el.tStart, 'a'], [el.tEnd, 'b']]) {
 }
 el.bpmRange.onchange = () => {
   if (state.mode === 'file') runAnalysis();
-  else if (state.mode === 'yt' && state.lastCapture) analyzeSamples(state.lastCapture.slice());
+  else if (state.mode === 'yt' && state.lastCapture) analyzeSamples(state.lastCapture.slice(), { rate: state.lastRate || 1 });
+  if (batch) el.batchRerun.hidden = false;
 };
 
 /* ------------------------------------------------------------ playback */
@@ -375,7 +392,7 @@ function runAnalysis() {
   const s = Math.floor(state.a * SR), e = Math.min(state.pcm.length, Math.ceil(state.b * SR));
   analyzeSamples(state.pcm.slice(s, e));
 }
-function analyzeSamples(samples) {
+function analyzeSamples(samples, extra = {}) {
   if (worker) worker.terminate();
   worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
   const id = ++jobId;
@@ -394,7 +411,7 @@ function analyzeSamples(samples) {
       }
       state.result = m.result;
       state.bpmFactor = 1;
-      renderResult(len);
+      renderResult(len * (extra.rate || 1));
     } else if (m.type === 'error') {
       setBusy(null);
       showError(`解析中にエラーが発生しました：${m.message}`);
@@ -402,7 +419,7 @@ function analyzeSamples(samples) {
   };
   // copy so the main thread keeps its data
   const copy = samples.buffer === state.pcm?.buffer ? samples.slice() : samples;
-  worker.postMessage({ id, samples: copy, opts: bpmOpts() }, [copy.buffer]);
+  worker.postMessage({ id, samples: copy, opts: { ...bpmOpts(), ...extra } }, [copy.buffer]);
 }
 
 function setBusy(p, label) {
@@ -543,12 +560,15 @@ async function loadYouTube(url) {
   teardownYouTube();
   if (worker) { worker.terminate(); worker = null; }
   state.mode = 'yt';
+  state.lastRate = 1;
   state.pcm = null; state.buffer = null; state.peaks = null; state.result = null; state.lastCapture = null;
   state.duration = 0;
   el.deck.hidden = false;
   el.ytWrap.hidden = false;
   el.analyzeYt.hidden = false;
+  el.ytSpeedWrap.hidden = false;
   el.analyzeYt.disabled = true;
+  closeBatch();
   el.timeline.classList.add('no-wave');
   el.title.textContent = 'YouTube';
   el.meta.textContent = '読み込み中…';
@@ -643,6 +663,16 @@ el.analyzeYt.onclick = async () => {
 
   el.analyzeYt.textContent = '取り込みを中止';
   el.play.disabled = true;
+  el.ytSpeed.disabled = true;
+  // play as fast as the player allows (pitch is preserved, so the key is unaffected;
+  // the analyzer divides the measured tempo by the playback rate)
+  let rate = 1;
+  if (el.ytSpeed.value === 'max') {
+    const rates = state.yt.getAvailablePlaybackRates?.() || [1];
+    rate = Math.max(1, ...rates.filter((r) => r <= 2));
+  }
+  state.yt.setPlaybackRate?.(rate);
+  state.capturing.rate = rate;
   state.yt.unMute?.();
   state.yt.seekTo(state.a, true);
   state.yt.playVideo();
@@ -651,6 +681,11 @@ el.analyzeYt.onclick = async () => {
   requestAnimationFrame(captureTick);
 };
 
+function advancingRate(cap, actual) {
+  // adopt the player's real rate only before any audio was recorded
+  return !cap.chunks.length && actual !== cap.rate;
+}
+
 function captureTick() {
   const cap = state.capturing;
   if (!cap) return;
@@ -658,13 +693,16 @@ function captureTick() {
   const st = state.yt.getPlayerState?.();
   const inRange = t >= cap.a - 0.05 && t <= cap.b + 0.2;
   // record only while the requested part is actually playing (skips ads, buffering, pauses)
-  const advancing = st === 1 && inRange && t > cap.lastT;
+  const actual = state.yt.getPlaybackRate?.() || cap.rate;
+  // the rate must stay constant during the capture: if the player changed it, keep the first rate we recorded at
+  if (advancingRate(cap, actual)) cap.rate = actual;
+  const advancing = st === 1 && inRange && t > cap.lastT && actual === cap.rate;
   cap.node.port.postMessage(advancing);
   cap.lastT = t;
   el.playhead.style.left = `${(t / state.duration) * 100}%`;
   const p = clamp((t - cap.a) / (cap.b - cap.a), 0, 1);
-  const remain = Math.max(0, cap.b - t);
-  setBusy(p * 0.98, st === 1 ? `再生しながら取り込み中… 残り ${Math.ceil(remain)} 秒` : '再生を待っています…（広告が流れている場合は終わるまでお待ちください）');
+  const remain = Math.max(0, cap.b - t) / (cap.rate || 1);
+  setBusy(p * 0.98, st === 1 ? `${cap.rate > 1 ? `${cap.rate}倍速で` : ''}再生しながら取り込み中… 残り ${Math.ceil(remain)} 秒` : '再生を待っています…（広告が流れている場合は終わるまでお待ちください）');
   if (t >= cap.b || st === 0) { finishCapture(false); return; }
   requestAnimationFrame(captureTick);
 }
@@ -676,8 +714,10 @@ async function finishCapture(aborted) {
   cap.node.port.postMessage(false);
   cap.stream.getTracks().forEach((t) => t.stop());
   state.yt.pauseVideo?.();
+  state.yt.setPlaybackRate?.(1);
   el.analyzeYt.textContent = 'タブの音声で判定';
   el.play.disabled = false;
+  el.ytSpeed.disabled = false;
   el.playhead.hidden = true;
   await new Promise((r) => setTimeout(r, 60));
   await cap.ctx.close();
@@ -694,7 +734,230 @@ async function finishCapture(aborted) {
   buf.copyToChannel(raw, 0);
   const pcm = await toMono22k(buf);
   state.lastCapture = pcm;
-  analyzeSamples(pcm.slice());
+  state.lastRate = cap.rate || 1;
+  analyzeSamples(pcm.slice(), { rate: state.lastRate });
 }
+
+/* ------------------------------------------------------------ batch (multiple files) */
+Object.assign(el, {
+  batch: $('batch'), batchTitle: $('batch-title'), batchBody: $('batch-body'), batchBar: $('batch-bar'),
+  batchLabel: $('batch-label'), batchProgress: $('batch-progress'), batchStop: $('batch-stop'),
+  batchRerun: $('batch-rerun'), batchCopy: $('batch-copy'), batchCsv: $('batch-csv'),
+});
+let batch = null; // { items, sort: {key, dir}, runId, workers }
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function batchConcurrency() {
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (mobile) return 1;
+  return (navigator.hardwareConcurrency || 4) >= 8 ? 3 : 2;
+}
+
+function closeBatch() {
+  if (!batch) return;
+  stopBatch();
+  batch.workers.forEach((w) => w.terminate());
+  batch = null;
+  el.batch.hidden = true;
+}
+
+function startBatch(files, overflow) {
+  closeBatch();
+  stopPlayback();
+  teardownYouTube();
+  if (worker) { worker.terminate(); worker = null; }
+  state.mode = null;
+  el.deck.hidden = true;
+  el.readout.hidden = true;
+  showError('');
+  el.readout.hidden = true;
+  batch = {
+    items: files.map((file, index) => ({ file, index, name: file.name, status: 'wait' })),
+    sort: { key: 'index', dir: 1 },
+    runId: 0,
+    workers: [],
+    overflow,
+    selected: -1,
+  };
+  el.batch.hidden = false;
+  runBatch();
+}
+
+function stopBatch() {
+  if (!batch) return;
+  batch.runId++;
+  for (const it of batch.items) if (it.status === 'wait' || it.status === 'busy') it.status = 'stopped';
+  renderBatch();
+}
+
+async function runBatch() {
+  const run = ++batch.runId;
+  const b = batch;
+  el.batchRerun.hidden = true;
+  el.batchStop.hidden = false;
+  const n = batchConcurrency();
+  while (b.workers.length < n) b.workers.push(new Worker(new URL('./worker.js', import.meta.url), { type: 'module' }));
+  const opts = bpmOpts();
+  const queue = b.items.filter((it) => it.status !== 'done' || it.optsKey !== JSON.stringify(opts));
+  queue.forEach((it) => { it.status = 'wait'; });
+  renderBatch();
+  let next = 0;
+  const lane = async (w) => {
+    while (b.runId === run && next < queue.length) {
+      const it = queue[next++];
+      it.status = 'busy';
+      renderBatch();
+      try {
+        const buf = await ctx().decodeAudioData(await it.file.arrayBuffer());
+        it.duration = buf.duration;
+        const pcm = await toMono22k(buf);
+        if (b.runId !== run) return;
+        const result = await new Promise((resolve, reject) => {
+          const jid = `${run}:${it.index}`;
+          w.onmessage = (ev) => {
+            if (ev.data.id !== jid) return; // a result from a cancelled run
+            if (ev.data.type === 'done') resolve(ev.data.result);
+            else if (ev.data.type === 'error') reject(new Error(ev.data.message));
+          };
+          w.postMessage({ id: jid, samples: pcm, opts }, [pcm.buffer]);
+        });
+        if (b.runId !== run) return;
+        if (result.error === 'silent') { it.status = 'error'; it.message = '無音'; }
+        else { it.result = result; it.status = 'done'; it.optsKey = JSON.stringify(opts); }
+      } catch (err) {
+        if (b.runId !== run) return;
+        it.status = 'error';
+        it.message = '読み込めません';
+      }
+      renderBatch();
+    }
+  };
+  await Promise.all(b.workers.map(lane));
+  if (b.runId === run && batch === b) {
+    el.batchStop.hidden = true;
+    renderBatch();
+  }
+}
+
+function camelotOrder(c) {
+  if (!c) return 999;
+  return parseInt(c, 10) * 2 + (c.endsWith('B') ? 1 : 0);
+}
+function batchValue(it, key) {
+  const t = it.result?.tempo, k = it.result?.key;
+  switch (key) {
+    case 'name': return it.name.toLowerCase();
+    case 'duration': return it.duration ?? Infinity;
+    case 'bpm': return t ? t.precise : Infinity;
+    case 'key': return k ? k.tonic * 2 + (k.mode === 'minor' ? 1 : 0) : 999;
+    case 'camelot': return camelotOrder(k?.camelot);
+    default: return it.index;
+  }
+}
+
+function renderBatch() {
+  const b = batch;
+  if (!b) return;
+  const done = b.items.filter((it) => it.status === 'done' || it.status === 'error').length;
+  const total = b.items.length;
+  const running = b.items.some((it) => it.status === 'busy' || it.status === 'wait');
+  el.batchTitle.textContent = `${total}曲${b.overflow ? `（${b.overflow}曲のうち先頭の${total}曲）` : ''}`;
+  el.batchProgress.hidden = !running;
+  el.batchBar.style.width = `${Math.round((done / total) * 100)}%`;
+  el.batchLabel.textContent = `解析中… ${done} / ${total}`;
+  el.batchStop.hidden = !running;
+  const { key, dir } = b.sort;
+  const rows = [...b.items].sort((x, y) => {
+    const a = batchValue(x, key), c = batchValue(y, key);
+    return (a < c ? -1 : a > c ? 1 : x.index - y.index) * dir;
+  });
+  el.batchBody.innerHTML = rows.map((it) => {
+    const t = it.result?.tempo, k = it.result?.key;
+    let bpm = '', keyTxt = '', cam = '';
+    if (it.status === 'done') {
+      bpm = t ? `${fmtBpm(t.bpm)}${t.confidence < 0.4 || !t.stable ? '<small title="信頼度が低い、またはテンポが揺れています">要確認</small>' : ''}` : '–';
+      keyTxt = k ? `${esc(k.short)}${k.confidence < 0.4 ? '<small title="信頼度が低い判定です">要確認</small>' : ''}` : '–';
+      cam = k ? esc(k.camelot) : '–';
+    } else {
+      const label = { wait: '待機中', busy: '解析中…', stopped: '中止', error: it.message || 'エラー' }[it.status];
+      bpm = `<span class="status ${it.status}">${label}</span>`;
+    }
+    return `<tr class="${it.index === b.selected ? 'selected' : ''}">
+      <td class="num c-no">${it.index + 1}</td>
+      <td class="name"><button data-open="${it.index}" title="${esc(it.name)}">${esc(it.name)}</button></td>
+      <td class="num c-len">${it.duration ? fmt(it.duration, 0) : ''}</td>
+      <td class="num bpm">${bpm}</td>
+      <td>${keyTxt}</td>
+      <td>${cam}</td>
+    </tr>`;
+  }).join('');
+  document.querySelectorAll('.batch-table th button').forEach((btn) => {
+    const on = btn.dataset.sort === key;
+    btn.closest('th').setAttribute('aria-sort', on ? (dir > 0 ? 'ascending' : 'descending') : 'none');
+  });
+  const hasDone = b.items.some((it) => it.status === 'done');
+  el.batchCsv.disabled = !hasDone;
+  el.batchCopy.disabled = !hasDone;
+}
+
+document.querySelector('.batch-table thead').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-sort]');
+  if (!btn || !batch) return;
+  const key = btn.dataset.sort;
+  batch.sort = { key, dir: batch.sort.key === key ? -batch.sort.dir : 1 };
+  renderBatch();
+});
+el.batchBody.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-open]');
+  if (!btn || !batch) return;
+  const it = batch.items[Number(btn.dataset.open)];
+  batch.selected = it.index;
+  renderBatch();
+  loadFile(it.file, { fromBatch: true });
+  el.deck.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+});
+el.batchStop.onclick = () => { stopBatch(); el.batchStop.hidden = true; };
+el.batchRerun.onclick = () => runBatch();
+
+function batchRows() {
+  const rows = [['No', 'ファイル名', '長さ(秒)', 'BPM', 'BPM(精密値)', 'テンポ', 'キー', 'Camelot', '平行調', '基準ピッチ(Hz)']];
+  const { key, dir } = batch.sort;
+  const items = [...batch.items].sort((x, y) => {
+    const a = batchValue(x, key), c = batchValue(y, key);
+    return (a < c ? -1 : a > c ? 1 : x.index - y.index) * dir;
+  });
+  for (const it of items) {
+    const t = it.result?.tempo, k = it.result?.key;
+    rows.push([
+      it.index + 1, it.name, it.duration ? it.duration.toFixed(1) : '',
+      t ? t.bpm : '', t ? t.precise.toFixed(2) : '', t ? (t.stable ? '一定' : '揺れあり') : '',
+      k ? k.name : (it.status === 'error' ? it.message : ''), k ? k.camelot : '', k ? k.relative.name : '',
+      k ? k.referenceA.toFixed(1) : '',
+    ]);
+  }
+  return rows;
+}
+el.batchCsv.onclick = () => {
+  const csv = batchRows().map((r) => r.map((v) => {
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(',')).join('\r\n');
+  // BOM so that Excel opens the Japanese text correctly
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const d = new Date();
+  a.download = `bpm-key_${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+el.batchCopy.onclick = async () => {
+  const tsv = batchRows().map((r) => r.join('\t')).join('\n');
+  try { await navigator.clipboard.writeText(tsv); el.batchCopy.textContent = 'コピーしました'; }
+  catch { el.batchCopy.textContent = 'コピーできませんでした'; }
+  setTimeout(() => (el.batchCopy.textContent = '一覧をコピー'), 1600);
+};
 
 $('year').textContent = new Date().getFullYear();

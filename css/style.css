@@ -89,7 +89,10 @@ body.no-side .side { display: none; }
 
 /* source */
 .source { background: var(--well); border-radius: var(--radius-lg); padding: 14px 14px 12px; }
+.source { display: grid; grid-template-columns: 1fr auto; align-items: start; column-gap: 12px; }
+.source > [role="tabpanel"] { grid-column: 1 / -1; }
 .source-tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.source-options { display: flex; align-items: center; gap: 12px; padding-top: 2px; }
 .source-tabs button {
   border: 0; background: transparent; padding: 6px 14px; border-radius: 999px; cursor: pointer;
   color: var(--ink-soft); font-weight: 500;
@@ -159,9 +162,10 @@ body.no-side .side { display: none; }
   padding: 4px 8px; font-variant-numeric: tabular-nums; color: var(--ink); text-align: center;
 }
 .range-len { font-variant-numeric: tabular-nums; }
-.bpm-range { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--ink-soft); margin-left: auto; }
-.bpm-range select { border: 1px solid var(--line); background: var(--well); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--ink); }
-@media (max-width: 600px) { .bpm-range { margin-left: 0; } }
+.bpm-range, .yt-speed { display: inline-flex; align-items: center; gap: 6px; font-size: 0.9rem; color: var(--ink-soft); }
+.yt-speed { margin-left: auto; }
+.bpm-range select, .yt-speed select { border: 1px solid var(--line); background: var(--well); border-radius: var(--radius-sm); padding: 4px 8px; color: var(--ink); }
+@media (max-width: 600px) { .yt-speed { margin-left: 0; } }
 
 /* readout — the memorable part: two oversized hardware-style readings */
 .readout { display: flex; flex-direction: column; gap: 14px; }
@@ -217,3 +221,40 @@ body.no-side .side { display: none; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* batch */
+.batch { display: flex; flex-direction: column; gap: 10px; }
+.batch-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.batch-title { margin: 0; font-weight: 700; }
+.batch-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.batch-actions .btn:disabled { opacity: 0.45; cursor: default; }
+.table-wrap { overflow-x: auto; border-radius: 14px; background: var(--well); max-height: 70vh; overflow-y: auto; }
+.batch-table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+.batch-table th.c-no { width: 52px; } .batch-table th.c-len { width: 72px; } .batch-table th.c-bpm { width: 128px; }
+.batch-table th.c-key { width: 120px; } .batch-table th.c-cam { width: 96px; }
+@media (max-width: 660px) {
+  .batch-table .c-no, .batch-table .c-len { display: none; }
+  .batch-table th, .batch-table td { padding-left: 8px; padding-right: 8px; }
+  .batch-table th button { padding-left: 8px; padding-right: 8px; }
+  .batch-table th.c-bpm { width: 84px; } .batch-table th.c-key { width: 80px; } .batch-table th.c-cam { width: 80px; }
+  .batch-table small { display: block; margin-left: 0; }
+}
+.batch-table th, .batch-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.batch-table thead th { position: sticky; top: 0; background: var(--well-2); z-index: 1; padding: 0; }
+.batch-table th button { all: unset; display: block; padding: 8px 12px; cursor: pointer; font-weight: 700; font-size: 0.86rem; }
+.batch-table th button:focus-visible { outline: 2px solid var(--cobalt); outline-offset: -2px; }
+.batch-table th[aria-sort="ascending"] button::after { content: " ▲"; font-size: 0.7em; }
+.batch-table th[aria-sort="descending"] button::after { content: " ▼"; font-size: 0.7em; }
+.batch-table .num { text-align: right; }
+.batch-table th.num button { text-align: right; box-sizing: border-box; width: 100%; }
+.batch-table td.name { overflow: hidden; }
+.batch-table td.name button { all: unset; cursor: pointer; display: block; overflow: hidden; text-overflow: ellipsis; color: var(--cobalt); }
+.batch-table td.name button:hover { text-decoration: underline; }
+.batch-table td.name button:focus-visible { outline: 2px solid var(--cobalt); }
+.batch-table td.bpm { font-weight: 700; }
+.batch-table small { margin-left: 6px; font-size: 0.72rem; font-weight: 500; color: var(--signal); }
+.batch-table tr.selected td { background: var(--cobalt-wash); }
+.batch-table tbody tr:last-child td { border-bottom: 0; }
+.status { font-weight: 400; color: var(--ink-soft); }
+.status.busy { color: var(--cobalt); }
+.status.error { color: var(--signal); }

@@ -97,6 +97,9 @@ function rms(x) {
 
 /* ---------------------------------------------------------------- TEMPO */
 const T_N = 1024, T_HOP = 256, FPS = SR / T_HOP;
+// Frames per second of *musical* time. Differs from FPS when the audio was captured at a
+// playback rate other than 1 (e.g. YouTube at 2x with pitch preserved): tempo = measured / rate.
+let TFPS = FPS;
 
 function melFilterbank(nBands, n, fmin, fmax) {
   const mel = (f) => 2595 * Math.log10(1 + f / 700);
@@ -187,7 +190,7 @@ function autocorr(e) {
   fft.transform(re, im);
   for (let i = 0; i < n; i++) { re[i] = re[i] * re[i] + im[i] * im[i]; im[i] = 0; }
   fft.transform(re, im); // real & symmetric -> forward FFT == n * inverse
-  const maxLag = Math.min(N - 1, Math.ceil((60 * FPS) / 25));
+  const maxLag = Math.min(N - 1, Math.ceil((60 * TFPS) / 25));
   const ac = new Float64Array(maxLag + 1);
   const z = re[0] / N || 1;
   for (let l = 0; l <= maxLag; l++) ac[l] = re[l] / (N - l) / z; // unbiased & normalised
@@ -203,7 +206,7 @@ function interp(a, x) {
 
 /** Periodicity strength at an exact tempo, from the Fourier tempogram with harmonics. */
 function fourierStrength(e, bpm, start = 0, end = e.length) {
-  const w0 = (2 * Math.PI * bpm) / 60 / FPS;
+  const w0 = (2 * Math.PI * bpm) / 60 / TFPS;
   const H = 4, hw = [1, 0.6, 0.45, 0.35];
   let total = 0;
   for (let h = 1; h <= H; h++) {
@@ -273,11 +276,20 @@ function trackBeats(e, period, tightness = 80) {
 }
 
 export function estimateTempo(x, opts = {}, progress) {
+  TFPS = FPS / (opts.rate || 1);
+  try {
+    return estimateTempoInner(x, opts, progress);
+  } finally {
+    TFPS = FPS;
+  }
+}
+
+function estimateTempoInner(x, opts, progress) {
   const minBpm = opts.minBpm ?? 0;
   const maxBpm = opts.maxBpm ?? 0;
   const e = onsetEnvelope(x, progress);
   const ac = autocorr(e);
-  const lagOf = (b) => (60 * FPS) / b;
+  const lagOf = (b) => (60 * TFPS) / b;
   const acLag = (l) => Math.max(interp(ac, l - 0.5), interp(ac, l), interp(ac, l + 0.5));
   const acAt = (b) => acLag(lagOf(b));
   const maxLag = ac.length - 2;
@@ -309,7 +321,23 @@ export function estimateTempo(x, opts = {}, progress) {
       if (b >= 50 && b <= 215) pool.push({ bpm: b, fam: p.s });
     }
   }
-  let scored = pool.map((c) => ({ bpm: c.bpm, score: c.fam * (0.5 + Math.max(0, acAt(c.bpm))) * prior(c.bpm) }));
+  // bar evidence: a true beat period repeats strongly at the bar length (3 or 4 beats);
+  // a 2/3 or 3/2 mis-reading (e.g. dotted rhythms in DnB) lands on 4.5 / 6 beats and scores lower
+  const bar = (b) => { const P = lagOf(b); return Math.max(0, acLag(3 * P), acLag(4 * P)); };
+  let scored = pool.map((c) => ({ bpm: c.bpm, score: c.fam * (0.5 + Math.max(0, acAt(c.bpm))) * prior(c.bpm), bar: bar(c.bpm) }));
+  // choose the tempo *family* (octave-equivalent set) with bar evidence, then the octave by the plain score
+  const famOf = (b) => { let r = b; while (r >= 2) r /= 2; while (r < 1) r *= 2; return r; };
+  const famStrength = new Map();
+  for (const c of scored) {
+    const f = famOf(c.bpm);
+    let key = [...famStrength.keys()].find((k) => Math.abs(k / f - 1) < 0.02 || Math.abs(k / f - 2) < 0.04 || Math.abs(f / k - 2) < 0.04);
+    if (key === undefined) key = f;
+    famStrength.set(key, Math.max(famStrength.get(key) || 0, c.score * (0.3 + c.bar)));
+    c.famKey = key;
+  }
+  let bestFam = null, bestFS = -1;
+  for (const [k, v] of famStrength) if (v > bestFS) { bestFS = v; bestFam = k; }
+  scored = scored.map((c) => ({ ...c, score: c.famKey === bestFam ? c.score : c.score * 0.5 }));
   if (minBpm || maxBpm) {
     scored = pool.map((c) => {
       let b = c.bpm;
@@ -336,7 +364,7 @@ export function estimateTempo(x, opts = {}, progress) {
       for (let t = s; t < s + win; t++) energy += e[t];
       if (energy / win < 0.15) continue;
       const r = refineBpm(e, ref.bpm, 0.08, s, s + win);
-      local.push({ t: (s + win / 2) / FPS, bpm: r.bpm });
+      local.push({ t: (s + win / 2) / TFPS, bpm: r.bpm });
     }
   }
   let stability = 1;
@@ -357,7 +385,7 @@ export function estimateTempo(x, opts = {}, progress) {
     // average over the tracked span, ignoring obvious skipped/doubled beats
     const good = ibis.filter((d) => d > med * 0.7 && d < med * 1.3);
     const avg = good.reduce((a, d) => a + d, 0) / good.length;
-    precise = (60 * FPS) / avg;
+    precise = (60 * TFPS) / avg;
     method = 'beats';
   }
   if (progress) progress(0.55);
@@ -372,14 +400,14 @@ export function estimateTempo(x, opts = {}, progress) {
   const confidence = Math.max(0, Math.min(1, (contrast - 1.2) / 3)) * (0.4 + 0.6 * stability);
 
   const nearestInt = Math.round(precise);
-  const durSec = e.length / FPS;
+  const durSec = e.length / TFPS;
   const isInt = Math.abs(precise - nearestInt) < (method === 'beats' ? 0.35 : Math.max(0.06, 1.5 / durSec));
   const uniq = [];
   for (const c of scored) {
     const b = Math.round(c.bpm * 10) / 10;
     if (!uniq.some((u) => Math.abs(u.bpm - b) / b < 0.02)) uniq.push({ bpm: b, score: c.score });
   }
-  const beatTimes = beatsForCheck.map((f) => f / FPS);
+  const beatTimes = beatsForCheck.map((f) => f / TFPS);
 
   return {
     bpm: isInt ? nearestInt : Math.round(precise * 100) / 100,

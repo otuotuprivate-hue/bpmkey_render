@@ -39,11 +39,23 @@
           <button role="tab" id="tab-yt" aria-selected="false" aria-controls="panel-yt">YouTube</button>
         </div>
 
+        <div class="source-options">
+          <label class="bpm-range">BPM範囲
+            <select id="bpm-range">
+              <option value="auto">自動</option>
+              <option value="60-120">60–120</option>
+              <option value="70-140">70–140</option>
+              <option value="85-170">85–170</option>
+              <option value="100-200">100–200</option>
+            </select>
+          </label>
+        </div>
+
         <div id="panel-file" role="tabpanel" aria-labelledby="tab-file">
           <label class="drop" id="drop">
-            <input type="file" id="file-input" accept="audio/*,video/mp4,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.aif,.aiff" class="visually-hidden">
+            <input type="file" id="file-input" accept="audio/*,video/mp4,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.aif,.aiff" multiple class="visually-hidden">
             <span class="drop-main">音楽ファイルをここにドロップ</span>
-            <span class="drop-sub">またはクリックして選択／Ctrl+V（⌘V）で貼り付け</span>
+            <span class="drop-sub">またはクリックして選択／Ctrl+V（⌘V）で貼り付け。最大100曲まとめて解析できます</span>
             <span class="drop-formats">MP3・WAV・M4A・FLAC・OGG・AIFF</span>
           </label>
           <p class="privacy-note">ファイルはサーバーに送信されません。解析はすべてこの端末のブラウザ内で行われます。</p>
@@ -55,8 +67,37 @@
             <input id="yt-url" type="url" inputmode="url" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
             <button type="submit" class="btn btn-primary">読み込む</button>
           </form>
-          <p class="privacy-note" id="yt-help">動画を再生しながら、このタブの音声をリアルタイムで取り込んで判定します（音声のダウンロードは行いません）。PC版のChrome・Edgeに対応。判定には選択範囲の長さと同じ時間がかかります。</p>
+          <p class="privacy-note" id="yt-help">動画を2倍速で再生しながら、このタブの音声を取り込んで判定します（音声のダウンロードは行いません）。3分の範囲なら約1分半で終わります。PC版のChrome・Edgeに対応。</p>
         </div>
+      </section>
+
+      <section class="batch" id="batch" hidden aria-label="まとめて解析した結果">
+        <div class="batch-head">
+          <p class="batch-title" id="batch-title"></p>
+          <div class="batch-actions">
+            <button class="btn btn-quiet" id="batch-stop">中止</button>
+            <button class="btn btn-quiet" id="batch-rerun" hidden>この設定で再解析</button>
+            <button class="btn btn-quiet" id="batch-copy">一覧をコピー</button>
+            <button class="btn btn-primary" id="batch-csv">CSVで保存</button>
+          </div>
+        </div>
+        <div class="progress" id="batch-progress"><div class="progress-bar" id="batch-bar"></div><span id="batch-label"></span></div>
+        <div class="table-wrap">
+          <table class="batch-table">
+            <thead>
+              <tr>
+                <th class="num c-no"><button data-sort="index">#</button></th>
+                <th><button data-sort="name">ファイル名</button></th>
+                <th class="num c-len"><button data-sort="duration">長さ</button></th>
+                <th class="num c-bpm"><button data-sort="bpm">BPM</button></th>
+                <th class="c-key"><button data-sort="key">キー</button></th>
+                <th class="c-cam"><button data-sort="camelot">Camelot</button></th>
+              </tr>
+            </thead>
+            <tbody id="batch-body"></tbody>
+          </table>
+        </div>
+        <p class="timeline-hint">見出しを押すと並べ替えできます。曲名を押すと、その曲の波形を開いて範囲を指定した判定ができます。</p>
       </section>
 
       <section class="deck" id="deck" hidden aria-label="範囲の選択と再生">
@@ -90,13 +131,10 @@
             <span class="range-len" id="t-len"></span>
           </div>
           <button class="btn btn-quiet" id="reset-range">全体</button>
-          <label class="bpm-range">BPM範囲
-            <select id="bpm-range">
-              <option value="auto">自動</option>
-              <option value="60-120">60–120</option>
-              <option value="70-140">70–140</option>
-              <option value="85-170">85–170</option>
-              <option value="100-200">100–200</option>
+          <label class="yt-speed" id="yt-speed-wrap" hidden>取り込み速度
+            <select id="yt-speed">
+              <option value="max">最速（2倍速）</option>
+              <option value="1">等速（高精度）</option>
             </select>
           </label>
           <button class="btn btn-primary" id="analyze-yt" hidden>タブの音声で判定</button>
@@ -138,8 +176,8 @@
       <section class="guide">
         <h2>使い方</h2>
         <ol>
-          <li>音楽ファイルをドロップするか、YouTubeのURLを貼り付けます。</li>
-          <li>ファイルの場合は曲全体のBPMとキーがすぐに表示されます。</li>
+          <li>音楽ファイルをドロップするか、YouTubeのURLを貼り付けます。ファイルは最大100曲まで一度に選べます。</li>
+          <li>1曲なら曲全体のBPMとキーがすぐに表示されます。複数曲なら一覧表で表示され、CSVで保存できます。</li>
           <li>一部分だけ調べたいときは、波形の上をドラッグして範囲を選びます。離すと自動で再判定します。</li>
         </ol>
         <h2>判定の仕組み</h2>
